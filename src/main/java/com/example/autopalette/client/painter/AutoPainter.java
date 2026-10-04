@@ -35,6 +35,7 @@ import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
 
 public class AutoPainter {
     public static final AutoPainter INSTANCE = new AutoPainter();
+    private static final long MIN_STROKE_INTERVAL_NANOS = 170_000_000L;
     private final Minecraft client = Minecraft.getInstance();
     private boolean active = false;
     private int delayTicks = 2;
@@ -46,6 +47,7 @@ public class AutoPainter {
     private String saveName = "";
     private final Queue<ActionStep> stepQueue = new LinkedList<ActionStep>();
     private int tickCounter = 0;
+    private long lastStrokeNanos = 0L;
     private int totalPixelsToDraw = 0;
     private int drawnPixelsCount = 0;
     private int currentPass = 1;
@@ -85,6 +87,7 @@ public class AutoPainter {
         this.saveName = saveName;
         this.stepQueue.clear();
         this.tickCounter = 0;
+        this.lastStrokeNanos = 0L;
         this.currentPass = 1;
         this.missingItemName = null;
         List<PixelDrawAction> actions = this.buildPaintActions();
@@ -189,14 +192,22 @@ public class AutoPainter {
                 continue;
             }
             if (step.type == ActionStep.Type.CLICK_CANVAS) {
+                if (this.lastStrokeNanos != 0L && System.nanoTime() - this.lastStrokeNanos < MIN_STROKE_INTERVAL_NANOS) {
+                    return;
+                }
                 this.client.gameMode.attack((Player)this.client.player, (Entity)this.activeCanvas);
+                this.lastStrokeNanos = System.nanoTime();
                 ++this.drawnPixelsCount;
                 this.stepQueue.poll();
                 this.tickCounter = Math.max(0, this.delayTicks);
                 return;
             }
             if (step.type != ActionStep.Type.RIGHT_CLICK_CANVAS) continue;
+            if (this.lastStrokeNanos != 0L && System.nanoTime() - this.lastStrokeNanos < MIN_STROKE_INTERVAL_NANOS) {
+                return;
+            }
             this.client.gameMode.interact((Player)this.client.player, (Entity)this.activeCanvas, new net.minecraft.world.phys.EntityHitResult(this.activeCanvas), InteractionHand.MAIN_HAND);
+            this.lastStrokeNanos = System.nanoTime();
             ++this.drawnPixelsCount;
             this.stepQueue.poll();
             this.tickCounter = Math.max(0, this.delayTicks);
@@ -426,12 +437,16 @@ public class AutoPainter {
         Direction direction = facing = this.client.player != null ? this.client.player.getDirection() : Direction.NORTH;
         float[][][] rotationsCache = facing == Direction.EAST ? eastRotations : (facing == Direction.WEST ? westRotations : (facing == Direction.NORTH ? northRotations : (facing == Direction.SOUTH ? southRotations : northRotations)));
         String lastItem = null;
+        PixelDrawAction previous = null;
         for (PixelDrawAction act : actions) {
             int mapX = CanvasLayout.mapCoordinate(act.x, this.targetColors.length);
             int mapY = CanvasLayout.mapCoordinate(act.y, this.targetColors.length);
             float yaw = rotationsCache[mapX][mapY][0];
             float pitch = rotationsCache[mapX][mapY][1];
             this.stepQueue.add(ActionStep.rotate(yaw, pitch));
+            if (previous == null || act.y != previous.y || Math.abs(act.x - previous.x) > 1) {
+                this.stepQueue.add(ActionStep.waitTicks(2));
+            }
             String baseDye = act.color.baseEntry.itemId;
             if (!baseDye.equals(lastItem)) {
                 this.stepQueue.add(ActionStep.equip(baseDye));
@@ -442,19 +457,25 @@ public class AutoPainter {
                 this.stepQueue.add(ActionStep.equip("minecraft:feather"));
                 lastItem = "minecraft:feather";
                 this.stepQueue.add(ActionStep.click());
+                previous = act;
                 continue;
             }
             if (act.color.shade == ArtMapPalette.ShadeLevel.DARKENED_1) {
                 this.stepQueue.add(ActionStep.equip("minecraft:coal"));
                 lastItem = "minecraft:coal";
                 this.stepQueue.add(ActionStep.click());
+                previous = act;
                 continue;
             }
-            if (act.color.shade != ArtMapPalette.ShadeLevel.DARKENED_2) continue;
+            if (act.color.shade != ArtMapPalette.ShadeLevel.DARKENED_2) {
+                previous = act;
+                continue;
+            }
             this.stepQueue.add(ActionStep.equip("minecraft:coal"));
             lastItem = "minecraft:coal";
             this.stepQueue.add(ActionStep.click());
             this.stepQueue.add(ActionStep.click());
+            previous = act;
         }
         if (this.autoVerify) {
             this.stepQueue.add(ActionStep.waitTicks(20));

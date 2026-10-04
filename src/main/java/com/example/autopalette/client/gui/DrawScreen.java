@@ -48,7 +48,7 @@ extends Screen {
     private int drawDelay = 2;
     private boolean smoothCam = true;
     private float rotationSpeed = 30.0f;
-    private static int selectedOrderIndex = 0;
+    private static int selectedOrderIndex = 3;
     private final String[] paintOrders = new String[]{"Row by Row (L to R)", "Row by Row (R to L)", "Column by Column", "Snake", "Color-Optimized"};
     private int ditheringModeIndex = 1;
     private static int canvasSizeIndex = 0;
@@ -91,7 +91,7 @@ extends Screen {
     private final List<MaterialEntry> materialsList = new ArrayList<MaterialEntry>();
 
     public DrawScreen() {
-        super((Component)Component.literal((String)"AutoPalette Panel v1.2.6"));
+        super((Component)Component.literal((String)"AutoPalette Panel v1.2.7"));
     }
 
     protected void init() {
