@@ -3,6 +3,7 @@ These modifications are licensed under the MIT License in LICENSE-NeonDev-MIT.
 Redistributions of the port modifications must retain that copyright and license notice.
 
 Original AutoPalette 1.2.4: by suoim, licensed under Apache License 2.0 in LICENSE.
+Upstream source: https://github.com/aacanadaa/AutoPalette
 The 26.2 port changes the input, GUI rendering, inventory, entity interaction,
 identifier, and material-highlighting code. The original Apache 2.0 terms still apply
 to the underlying work and must be retained when redistributing it.

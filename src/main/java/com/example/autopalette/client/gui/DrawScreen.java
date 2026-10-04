@@ -7,6 +7,8 @@ import com.example.autopalette.client.palette.ArtMapPalette;
 import com.example.autopalette.client.util.MaterialHighlighter;
 import com.mojang.blaze3d.platform.NativeImage;
 import java.awt.Graphics2D;
+import java.awt.Color;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -46,9 +48,13 @@ extends Screen {
     private int drawDelay = 2;
     private boolean smoothCam = true;
     private float rotationSpeed = 30.0f;
-    private int selectedOrderIndex = 4;
+    private static int selectedOrderIndex = 0;
     private final String[] paintOrders = new String[]{"Row by Row (L to R)", "Row by Row (R to L)", "Column by Column", "Snake", "Color-Optimized"};
     private int ditheringModeIndex = 1;
+    private static int canvasSizeIndex = 0;
+    private static int imageFitIndex = 0;
+    private static final int[] CANVAS_SIZES = {32, 64, 128};
+    private static final String[] IMAGE_FITS = {"Fit", "Fill", "Stretch"};
     private boolean dyesOnly = false;
     private int maxColorsIndex = 0;
     private final int[] colorLimits = new int[]{-1, 32, 16, 8};
@@ -73,6 +79,8 @@ extends Screen {
     private Button highlightButton;
     private Button exportMaterialsButton;
     private Button autoVerifyButton;
+    private Button canvasSizeButton;
+    private Button imageFitButton;
     private boolean autoVerify = false;
     private Button autoSaveButton;
     private EditBox autoSaveTextField;
@@ -83,7 +91,7 @@ extends Screen {
     private final List<MaterialEntry> materialsList = new ArrayList<MaterialEntry>();
 
     public DrawScreen() {
-        super((Component)Component.literal((String)"AutoPalette Panel v1.2.5"));
+        super((Component)Component.literal((String)"AutoPalette Panel v1.2.6"));
     }
 
     protected void init() {
@@ -192,6 +200,16 @@ extends Screen {
         this.autoSaveTextField.setValue(saveName);
         this.addRenderableWidget(this.autoSaveTextField);
         this.exportMaterialsButton = this.addRenderableWidget(Button.builder(Component.literal("Export Materials"), button -> this.exportMaterials()).bounds(145, 230, 150, 20).build());
+        this.canvasSizeButton = this.addRenderableWidget(Button.builder(Component.literal("Canvas: 32 x 32"), button -> {
+            canvasSizeIndex = (canvasSizeIndex + 1) % CANVAS_SIZES.length;
+            this.updateButtonsText();
+            this.loadSelectedImagePreview();
+        }).bounds(300, 230, 128, 20).build());
+        this.imageFitButton = this.addRenderableWidget(Button.builder(Component.literal("Image: Fit"), button -> {
+            imageFitIndex = (imageFitIndex + 1) % IMAGE_FITS.length;
+            this.updateButtonsText();
+            this.loadSelectedImagePreview();
+        }).bounds(300, 255, 128, 20).build());
         this.drawButton = (Button)this.addRenderableWidget(Button.builder((Component)Component.literal((String)"START DRAWING"), button -> {
             if (AutoPainter.INSTANCE.isActive()) {
                 AutoPainter.INSTANCE.stopPainting();
@@ -231,6 +249,8 @@ extends Screen {
             default -> "None";
         };
         this.ditheringButton.setMessage((Component)Component.literal((String)("Dithering: " + ditheringText)));
+        this.canvasSizeButton.setMessage(Component.literal("Canvas: " + CANVAS_SIZES[canvasSizeIndex] + " x " + CANVAS_SIZES[canvasSizeIndex]));
+        this.imageFitButton.setMessage(Component.literal("Image: " + IMAGE_FITS[imageFitIndex]));
         this.smoothCamButton.setMessage((Component)Component.literal((String)("Cam: " + (this.smoothCam ? "ON" : "OFF"))));
         if (this.autoVerifyButton != null) {
             this.autoVerifyButton.setMessage((Component)Component.literal((String)("Verify: " + (this.autoVerify ? "ON" : "OFF"))));
@@ -326,11 +346,24 @@ extends Screen {
             if (originalImage == null) {
                 return;
             }
-            BufferedImage resized = new BufferedImage(128, 128, 1);
+            int resolution = CANVAS_SIZES[canvasSizeIndex];
+            BufferedImage resized = new BufferedImage(resolution, resolution, BufferedImage.TYPE_INT_RGB);
             Graphics2D graphics = resized.createGraphics();
-            graphics.drawImage(originalImage, 0, 0, 128, 128, null);
+            graphics.setColor(Color.WHITE);
+            graphics.fillRect(0, 0, resolution, resolution);
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            double scale = imageFitIndex == 0
+                    ? Math.min((double) resolution / originalImage.getWidth(), (double) resolution / originalImage.getHeight())
+                    : Math.max((double) resolution / originalImage.getWidth(), (double) resolution / originalImage.getHeight());
+            if (imageFitIndex == 2) {
+                graphics.drawImage(originalImage, 0, 0, resolution, resolution, null);
+            } else {
+                int width = Math.max(1, (int) Math.round(originalImage.getWidth() * scale));
+                int height = Math.max(1, (int) Math.round(originalImage.getHeight() * scale));
+                graphics.drawImage(originalImage, (resolution - width) / 2, (resolution - height) / 2, width, height, null);
+            }
             graphics.dispose();
-            this.mappedColorsGrid = new ArtMapPalette.MappedColor[128][128];
+            this.mappedColorsGrid = new ArtMapPalette.MappedColor[resolution][resolution];
             NativeImage previewImg = new NativeImage(128, 128, false);
             int limit = this.colorLimits[this.maxColorsIndex];
             HashSet<ArtMapPalette.PaletteEntry> allowedBaseEntries = new HashSet<ArtMapPalette.PaletteEntry>();
@@ -338,8 +371,8 @@ extends Screen {
                 allowedBaseEntries.addAll(this.palette.getBaseEntries());
             } else {
                 HashMap<ArtMapPalette.PaletteEntry, Integer> frequencyMap = new HashMap<ArtMapPalette.PaletteEntry, Integer>();
-                for (int y = 0; y < 128; ++y) {
-                    for (x = 0; x < 128; ++x) {
+                for (int y = 0; y < resolution; ++y) {
+                    for (x = 0; x < resolution; ++x) {
                         int b;
                         int g;
                         rgb = resized.getRGB(x, y);
@@ -360,17 +393,17 @@ extends Screen {
             }
             if (this.ditheringModeIndex == 1) {
                 int y;
-                double[][][] rgbGrid = new double[128][128][3];
-                for (y = 0; y < 128; ++y) {
-                    for (x = 0; x < 128; ++x) {
+                double[][][] rgbGrid = new double[resolution][resolution][3];
+                for (y = 0; y < resolution; ++y) {
+                    for (x = 0; x < resolution; ++x) {
                         rgb = resized.getRGB(x, y);
                         rgbGrid[x][y][0] = rgb >> 16 & 0xFF;
                         rgbGrid[x][y][1] = rgb >> 8 & 0xFF;
                         rgbGrid[x][y][2] = rgb & 0xFF;
                     }
                 }
-                for (y = 0; y < 128; ++y) {
-                    for (x = 0; x < 128; ++x) {
+                for (y = 0; y < resolution; ++y) {
+                    for (x = 0; x < resolution; ++x) {
                         ArtMapPalette.MappedColor closest;
                         double r = Math.min(255.0, Math.max(0.0, rgbGrid[x][y][0]));
                         double g = Math.min(255.0, Math.max(0.0, rgbGrid[x][y][1]));
@@ -391,8 +424,8 @@ extends Screen {
                 int size = this.ditheringModeIndex == 2 ? 4 : 8;
                 int[][] bayerMatrix = this.ditheringModeIndex == 2 ? BAYER_4X4 : BAYER_8X8;
                 double spread = 32.0;
-                for (int y = 0; y < 128; ++y) {
-                    for (int x2 = 0; x2 < 128; ++x2) {
+                for (int y = 0; y < resolution; ++y) {
+                    for (int x2 = 0; x2 < resolution; ++x2) {
                         ArtMapPalette.MappedColor closest;
                         int rgb2 = resized.getRGB(x2, y);
                         int origR = rgb2 >> 16 & 0xFF;
@@ -411,8 +444,8 @@ extends Screen {
                     }
                 }
             } else {
-                for (int y = 0; y < 128; ++y) {
-                    for (int x3 = 0; x3 < 128; ++x3) {
+                for (int y = 0; y < resolution; ++y) {
+                    for (int x3 = 0; x3 < resolution; ++x3) {
                         ArtMapPalette.MappedColor closest;
                         int rgb3 = resized.getRGB(x3, y);
                         int r = rgb3 >> 16 & 0xFF;
@@ -422,6 +455,14 @@ extends Screen {
                         int abgr = 0xFF000000 | closest.b << 16 | closest.g << 8 | closest.r;
                         previewImg.setPixelABGR(x3, y, abgr);
                     }
+                }
+            }
+            int pixelScale = 128 / resolution;
+            for (int py = 0; py < 128; ++py) {
+                for (int px = 0; px < 128; ++px) {
+                    ArtMapPalette.MappedColor color = this.mappedColorsGrid[px / pixelScale][py / pixelScale];
+                    int abgr = 0xFF000000 | color.b << 16 | color.g << 8 | color.r;
+                    previewImg.setPixelABGR(px, py, abgr);
                 }
             }
             if (this.previewTexture != null) {
@@ -440,7 +481,7 @@ extends Screen {
     }
 
     private void distributeError(double[][][] rgbGrid, int x, int y, double errR, double errG, double errB, double factor) {
-        if (x >= 0 && x < 128 && y >= 0 && y < 128) {
+        if (x >= 0 && x < CANVAS_SIZES[canvasSizeIndex] && y >= 0 && y < CANVAS_SIZES[canvasSizeIndex]) {
             double[] dArray = rgbGrid[x][y];
             dArray[0] = dArray[0] + errR * factor;
             double[] dArray2 = rgbGrid[x][y];
@@ -528,8 +569,8 @@ extends Screen {
         HashMap<String, Integer> dyeCounts = new HashMap<String, Integer>();
         int feathersTotal = 0;
         int coalTotal = 0;
-        for (int y = 0; y < 128; ++y) {
-            for (int x = 0; x < 128; ++x) {
+        for (int y = 0; y < this.mappedColorsGrid.length; ++y) {
+            for (int x = 0; x < this.mappedColorsGrid.length; ++x) {
                 ArtMapPalette.MappedColor color = this.mappedColorsGrid[x][y];
                 if (color == null) continue;
                 String string = color.baseEntry.displayName;

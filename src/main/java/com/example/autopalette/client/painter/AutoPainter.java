@@ -332,8 +332,9 @@ public class AutoPainter {
         if (mapId != null && this.client.level != null && (mapState = this.client.level.getMapData(mapId)) != null) {
             currentColors = mapState.colors;
         }
-        for (int y = 0; y < 128; ++y) {
-            for (int x = 0; x < 128; ++x) {
+        int resolution = this.targetColors.length;
+        for (int y = 0; y < resolution; ++y) {
+            for (int x = 0; x < resolution; ++x) {
                 int curB;
                 int bDiff;
                 int curG;
@@ -346,7 +347,9 @@ public class AutoPainter {
                 int colorId;
                 int pixelIndex;
                 ArtMapPalette.MappedColor color = this.targetColors[x][y];
-                if (color == null || currentColors != null && (pixelIndex = x + y * 128) >= 0 && pixelIndex < currentColors.length && (colorId = ((currentByte = currentColors[pixelIndex]) & 0xFF) / 4) != 0 && (dist = Math.sqrt((rDiff = (curR = (currentRgb = this.getMapColorRgb(currentByte)) >> 16 & 0xFF) - color.r) * rDiff + (gDiff = (curG = currentRgb >> 8 & 0xFF) - color.g) * gDiff + (bDiff = (curB = currentRgb & 0xFF) - color.b) * bDiff)) < 8.0) continue;
+                int mapX = CanvasLayout.mapCoordinate(x, resolution);
+                int mapY = CanvasLayout.mapCoordinate(y, resolution);
+                if (color == null || currentColors != null && (pixelIndex = mapX + mapY * 128) >= 0 && pixelIndex < currentColors.length && (colorId = ((currentByte = currentColors[pixelIndex]) & 0xFF) / 4) != 0 && (dist = Math.sqrt((rDiff = (curR = (currentRgb = this.getMapColorRgb(currentByte)) >> 16 & 0xFF) - color.r) * rDiff + (gDiff = (curG = currentRgb >> 8 & 0xFF) - color.g) * gDiff + (bDiff = (curB = currentRgb & 0xFF) - color.b) * bDiff)) < 8.0) continue;
                 actions.add(new PixelDrawAction(x, y, color));
             }
         }
@@ -383,11 +386,6 @@ public class AutoPainter {
         southRotations = this.loadRotationAsset("/assets/autopalette/south.ser");
     }
 
-    /*
-     * Enabled aggressive block sorting
-     * Enabled unnecessary exception pruning
-     * Enabled aggressive exception aggregation
-     */
     private float[][][] loadRotationAsset(String resourcePath) {
         float[][][] rotations = new float[128][128][2];
         try (InputStream is = AutoPainter.class.getResourceAsStream(resourcePath);){
@@ -429,8 +427,10 @@ public class AutoPainter {
         float[][][] rotationsCache = facing == Direction.EAST ? eastRotations : (facing == Direction.WEST ? westRotations : (facing == Direction.NORTH ? northRotations : (facing == Direction.SOUTH ? southRotations : northRotations)));
         String lastItem = null;
         for (PixelDrawAction act : actions) {
-            float yaw = rotationsCache[act.x][act.y][0];
-            float pitch = rotationsCache[act.x][act.y][1];
+            int mapX = CanvasLayout.mapCoordinate(act.x, this.targetColors.length);
+            int mapY = CanvasLayout.mapCoordinate(act.y, this.targetColors.length);
+            float yaw = rotationsCache[mapX][mapY][0];
+            float pitch = rotationsCache[mapX][mapY][1];
             this.stepQueue.add(ActionStep.rotate(yaw, pitch));
             String baseDye = act.color.baseEntry.itemId;
             if (!baseDye.equals(lastItem)) {
