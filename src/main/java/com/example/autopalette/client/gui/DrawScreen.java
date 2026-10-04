@@ -10,6 +10,9 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -68,6 +71,7 @@ extends Screen {
     private Button maxColorsButton;
     private Button dyesOnlyButton;
     private Button highlightButton;
+    private Button exportMaterialsButton;
     private Button autoVerifyButton;
     private boolean autoVerify = false;
     private Button autoSaveButton;
@@ -79,7 +83,7 @@ extends Screen {
     private final List<MaterialEntry> materialsList = new ArrayList<MaterialEntry>();
 
     public DrawScreen() {
-        super((Component)Component.literal((String)"AutoPalette Panel v1.2.4"));
+        super((Component)Component.literal((String)"AutoPalette Panel v1.2.5"));
     }
 
     protected void init() {
@@ -187,6 +191,7 @@ extends Screen {
         this.autoSaveTextField.setMaxLength(32);
         this.autoSaveTextField.setValue(saveName);
         this.addRenderableWidget(this.autoSaveTextField);
+        this.exportMaterialsButton = this.addRenderableWidget(Button.builder(Component.literal("Export Materials"), button -> this.exportMaterials()).bounds(145, 230, 150, 20).build());
         this.drawButton = (Button)this.addRenderableWidget(Button.builder((Component)Component.literal((String)"START DRAWING"), button -> {
             if (AutoPainter.INSTANCE.isActive()) {
                 AutoPainter.INSTANCE.stopPainting();
@@ -427,6 +432,7 @@ extends Screen {
             Minecraft.getInstance().getTextureManager().register(this.previewTextureId, (AbstractTexture)this.previewTexture);
             this.calculateMaterialsList();
             this.materialScrollOffset = 0;
+            this.updateTabVisibility();
         }
         catch (IOException e) {
             e.printStackTrace();
@@ -565,6 +571,48 @@ extends Screen {
         }
     }
 
+    private void exportMaterials() {
+        if (this.selectedImageIndex < 0 || this.selectedImageIndex >= this.imageFiles.size() || this.materialsList.isEmpty()) {
+            return;
+        }
+
+        String imageName = this.imageFiles.get(this.selectedImageIndex).getName();
+        String baseName = imageName.replaceFirst("(?i)\\.(png|jpe?g)$", "").replaceAll("[^a-zA-Z0-9._-]", "_");
+        if (baseName.isBlank()) {
+            baseName = "painting";
+        }
+
+        StringBuilder text = new StringBuilder("Materials for ").append(imageName).append('\n');
+        StringBuilder csv = new StringBuilder("item_name,item_id,count,stacks,remainder\n");
+        for (MaterialEntry entry : this.materialsList) {
+            int stacks = entry.count / 64;
+            int remainder = entry.count % 64;
+            text.append(entry.name).append(": ").append(entry.count)
+                .append(" (").append(stacks).append(" stacks + ").append(remainder).append(")\n");
+            csv.append(csvCell(entry.name)).append(',').append(csvCell(entry.itemId)).append(',')
+                .append(entry.count).append(',').append(stacks).append(',').append(remainder).append('\n');
+        }
+
+        try {
+            Path directory = Minecraft.getInstance().gameDirectory.toPath().resolve("config/autopalette/exports");
+            Files.createDirectories(directory);
+            Files.writeString(directory.resolve(baseName + "-materials.txt"), text, StandardCharsets.UTF_8);
+            Files.writeString(directory.resolve(baseName + "-materials.csv"), csv, StandardCharsets.UTF_8);
+            Minecraft.getInstance().keyboardHandler.setClipboard(text.toString());
+            if (Minecraft.getInstance().player != null) {
+                Minecraft.getInstance().player.sendSystemMessage(Component.literal("Materials exported to config/autopalette/exports and copied to clipboard."));
+            }
+        } catch (IOException e) {
+            if (Minecraft.getInstance().player != null) {
+                Minecraft.getInstance().player.sendSystemMessage(Component.literal("Could not export materials: " + e.getMessage()));
+            }
+        }
+    }
+
+    private static String csvCell(String value) {
+        return "\"" + value.replace("\"", "\"\"") + "\"";
+    }
+
     private void updateTabVisibility() {
         boolean showMatScroll;
         boolean showSettings;
@@ -597,6 +645,10 @@ extends Screen {
         if (this.highlightButton != null) {
             this.highlightButton.visible = this.showMaterialsTab;
             this.highlightButton.active = this.showMaterialsTab;
+        }
+        if (this.exportMaterialsButton != null) {
+            this.exportMaterialsButton.visible = this.showMaterialsTab;
+            this.exportMaterialsButton.active = this.showMaterialsTab && !this.materialsList.isEmpty();
         }
         this.matScrollUpButton.visible = showMatScroll = this.showMaterialsTab && this.materialsList.size() > 8;
         this.matScrollUpButton.active = showMatScroll;
